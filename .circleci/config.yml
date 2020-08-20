@@ -11,7 +11,7 @@ executors:
   # should also be updated.
   golang:
     docker:
-    - image: circleci/golang:1.14-node
+    - image: circleci/golang:1.15-node
 
   fuzzit:
     docker:
@@ -27,8 +27,8 @@ jobs:
         key: v1
     - restore_cache:
         keys:
-        - v1-npm-deps-{{ checksum "web/ui/react-app/yarn.lock" }}
-        - v1-npm-deps-
+        - v3-npm-deps-{{ checksum "web/ui/react-app/yarn.lock" }}
+        - v3-npm-deps-
     - run:
         command: make
         environment:
@@ -41,7 +41,7 @@ jobs:
           GOOPTS: "-p 2"
           GOMAXPROCS: "2"
     - prometheus/check_proto:
-        version: "3.11.4"
+        version: "3.12.3"
     - prometheus/store_artifact:
         file: prometheus
     - prometheus/store_artifact:
@@ -49,9 +49,9 @@ jobs:
     - go/save-cache:
         key: v1
     - save_cache:
-        key: v1-npm-deps-{{ checksum "web/ui/react-app/yarn.lock" }}
+        key: v3-npm-deps-{{ checksum "web/ui/react-app/yarn.lock" }}
         paths:
-        - web/ui/react-app/node_modules
+        - /home/circleci/.cache/yarn
     - store_test_results:
         path: test-results
   test_windows:
@@ -60,10 +60,15 @@ jobs:
     steps:
     - checkout
     - run:
+        # Temporary workaround until circleci updates go.
+        shell: bash
+        command: |
+          choco upgrade -y golang
+    - run:
         shell: bash
         command: |
           (cd web/ui && GOOS= GOARCH= go generate -mod=vendor)
-          go test -mod=vendor -test.v `go list ./...|grep -Exv "(github.com/prometheus/prometheus/discovery.*|github.com/prometheus/prometheus/config|github.com/prometheus/prometheus/web)"`
+          go test -mod=vendor -vet=off -test.v `go list ./...|grep -Exv "(github.com/prometheus/prometheus/discovery.*|github.com/prometheus/prometheus/config|github.com/prometheus/prometheus/web)"`
         environment:
           GOGC: "20"
           GOOPTS: "-p 2 -mod=vendor"
@@ -82,11 +87,11 @@ jobs:
       - setup_remote_docker
       - run: ./fuzzit.sh fuzzing
 
-  makefile_sync:
+  repo_sync:
     executor: golang
     steps:
     - checkout
-    - run: ./scripts/sync_makefiles.sh
+    - run: ./scripts/sync_repo_files.sh
 
 workflows:
   version: 2
@@ -138,7 +143,7 @@ workflows:
               only:
                 - master
     jobs:
-    - makefile_sync:
+    - repo_sync:
         context: org-context
     - fuzzit_fuzzing:
         context: org-context
