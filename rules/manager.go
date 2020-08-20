@@ -447,7 +447,7 @@ func (g *Group) HasAlertingRules() bool {
 }
 
 // GetEvaluationDuration returns the time in seconds it took to evaluate the rule group.
-func (g *Group) GetEvaluationDuration() time.Duration {
+func (g *Group) GetdDuration() time.Duration {
 	g.mtx.Lock()
 	defer g.mtx.Unlock()
 	return g.evaluationDuration
