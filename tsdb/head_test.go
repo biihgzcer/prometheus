@@ -319,6 +319,13 @@ func TestHead_WALMultiRef(t *testing.T) {
 	}}, series)
 }
 
+func TestHead_UnknownWALRecord(t *testing.T) {
+	head, w := newTestHead(t, 1000, false)
+	w.Log([]byte{255, 42})
+	testutil.Ok(t, head.Init(0))
+	testutil.Ok(t, head.Close())
+}
+
 func TestHead_Truncate(t *testing.T) {
 	h, _ := newTestHead(t, 1000, false)
 	defer func() {
@@ -387,11 +394,21 @@ func TestHead_Truncate(t *testing.T) {
 		"2": {},
 	}, h.symbols)
 
-	testutil.Equals(t, map[string]stringset{
+	values := map[string]map[string]struct{}{}
+	for _, name := range h.postings.LabelNames() {
+		ss, ok := values[name]
+		if !ok {
+			ss = map[string]struct{}{}
+			values[name] = ss
+		}
+		for _, value := range h.postings.LabelValues(name) {
+			ss[value] = struct{}{}
+		}
+	}
+	testutil.Equals(t, map[string]map[string]struct{}{
 		"a": {"1": struct{}{}, "2": struct{}{}},
 		"b": {"1": struct{}{}},
-		"":  {"": struct{}{}},
-	}, h.values)
+	}, values)
 }
 
 // Validate various behaviors brought on by firstChunkID accounting for
@@ -562,14 +579,14 @@ func TestHeadDeleteSimple(t *testing.T) {
 				}
 				testutil.Ok(t, app.Commit())
 
-				// Compare the samples for both heads - before and after the reload.
-				reloadedW, err := wal.New(nil, nil, w.Dir(), compress) // Use a new wal to ensure deleted samples are gone even after a reload.
+				// Compare the samples for both heads - before and after the reloadBlocks.
+				reloadedW, err := wal.New(nil, nil, w.Dir(), compress) // Use a new wal to ensure deleted samples are gone even after a reloadBlocks.
 				testutil.Ok(t, err)
 				reloadedHead, err := NewHead(nil, nil, reloadedW, 1000, reloadedW.Dir(), nil, DefaultStripeSize, nil)
 				testutil.Ok(t, err)
 				testutil.Ok(t, reloadedHead.Init(0))
 
-				// Compare the query results for both heads - before and after the reload.
+				// Compare the query results for both heads - before and after the reloadBlocks.
 			Outer:
 				for _, h := range []*Head{head, reloadedHead} {
 					q, err := NewBlockQuerier(h, h.MinTime(), h.MaxTime())
@@ -1198,18 +1215,6 @@ func TestWalRepair_DecodingError(t *testing.T) {
 		totalRecs int
 		expRecs   int
 	}{
-		"invalid_record": {
-			func(rec []byte) []byte {
-				// Do not modify the base record because it is Logged multiple times.
-				res := make([]byte, len(rec))
-				copy(res, rec)
-				res[0] = byte(record.Invalid)
-				return res
-			},
-			enc.Series([]record.RefSeries{{Ref: 1, Labels: labels.FromStrings("a", "b")}}, []byte{}),
-			9,
-			5,
-		},
 		"decode_series": {
 			func(rec []byte) []byte {
 				return rec[:3]
@@ -1377,19 +1382,19 @@ func TestNewWalSegmentOnTruncate(t *testing.T) {
 	}
 
 	add(0)
-	_, last, err := wlog.Segments()
+	_, last, err := wal.Segments(wlog.Dir())
 	testutil.Ok(t, err)
 	testutil.Equals(t, 0, last)
 
 	add(1)
 	testutil.Ok(t, h.Truncate(1))
-	_, last, err = wlog.Segments()
+	_, last, err = wal.Segments(wlog.Dir())
 	testutil.Ok(t, err)
 	testutil.Equals(t, 1, last)
 
 	add(2)
 	testutil.Ok(t, h.Truncate(2))
-	_, last, err = wlog.Segments()
+	_, last, err = wal.Segments(wlog.Dir())
 	testutil.Ok(t, err)
 	testutil.Equals(t, 2, last)
 }
